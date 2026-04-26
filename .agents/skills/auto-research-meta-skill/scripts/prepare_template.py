@@ -240,5 +240,31 @@ def main():
     # The loop reads results/latest_run.json — exit code is not the signal.
     sys.exit(0)
 
+# ─── GUARDRAIL HELPERS (v3.0) ────────────────────────────────────────────────
+# Use these in your ASSERTIONS to ensure compliance with global rules.
+
+def check_gemini_compliance(code: str) -> bool:
+    """Check if code follows GEMINI.md rules (e.g. threading locks)."""
+    # Example: Ensure threading.Lock() is used if state is updated
+    if "state[" in code and "Lock()" not in code:
+        return False
+    # Example: Ensure daemon=True is used
+    if "threading.Thread" in code and "daemon=True" not in code:
+        return False
+    return True
+
+def check_backend_guardrails(code: str) -> bool:
+    """Check if code follows backend-guardrails.md (e.g. Zod, Sentry)."""
+    # Example: Ensure Zod is used for validation
+    if ".parse(" not in code and ".safeParse(" not in code:
+        return False
+    return True
+
 if __name__ == "__main__":
+    # Phase 0: Rule Ingestion (Pre-flight check)
+    if os.path.exists("GEMINI.md"):
+        print("[auto-research] Phase 0: Ingested GEMINI.md")
+    if os.path.exists("backend-guardrails.md"):
+        print("[auto-research] Phase 0: Ingested backend-guardrails.md")
+    
     main()

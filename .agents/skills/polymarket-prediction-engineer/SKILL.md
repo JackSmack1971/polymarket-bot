@@ -1,175 +1,64 @@
 ---
 name: polymarket-prediction-engineer
-description: >
-  Specialist for developing, debugging, and tuning the Polymarket Bitcoin AI
-  prediction terminal (poly_ui.py / poly_or.py). Activates when the user
-  mentions: AI prediction accuracy, implied price, jumps too much, system
-  prompt, conversation history, prediction consistency, gpt-5-mini, kimi-k2,
-  reasoning API, OpenRouter model swap, output format, sparkline, market
-  synthesis, event ID, CLOB, Gamma API, probability-weighted price, reach/dip,
-  fine ranges, bracket weights, or extract_ai_price. Also triggers on requests
-  to add features, change models, fix terminal display, or improve stability
-  of the prediction loop. Do NOT activate for general Python questions unrelated
-  to this project.
+description: Specialist for developing, debugging, and tuning the Polymarket Bitcoin AI prediction terminal. Focuses on AI prompt engineering, prediction accuracy, and consistency.
 ---
 
 # Polymarket Prediction Engineer
 
-You are the domain expert for this Bitcoin prediction terminal. The codebase
-has two near-identical entry points:
+Expert for the AI prediction logic in `poly_ui.py` and `poly_or.py`.
 
-| File | AI Provider | Key difference |
-|------|-------------|----------------|
-| `poly_ui.py` | OpenAI (`gpt-5-mini`) | Uses Responses API + `reasoning={"effort":"high"}` |
-| `poly_or.py` | OpenRouter (`moonshotai/kimi-k2`) | Standard chat completions, no reasoning param |
+## Core Invariants
 
-The function `update_ai_analysis_async()` (~lines 300–420 in each file) is
-the **most critical function**. It owns the system prompt, conversation memory,
-and AI call. Treat it as the intellectual core of the project.
-
----
-
-## Core Invariants — Never Violate
-
-1. **Output format is sacred**: model MUST return exactly:
-   `Implied price: $XXX,XXX - [ONE insight ≤100 chars]`
-   — `extract_ai_price()` uses regex `r'\$([0-9,]+)'`; format drift breaks
-   the entire display pipeline.
-
-2. **Conversation memory is load-bearing**: 16-message window (8 user + 8
-   assistant) gives the AI "prediction tracking" behavior. Never make it
-   stateless.
-
-3. **30% previous-prediction anchor**: stabilizes the loop.
-   Formula: `new = 0.70 × fresh_calc + 0.30 × prev` when probability
-   change < 2%. This is the primary anti-jitter mechanism.
-
-4. **One insight only**: terminal column width is constrained. Multi-insight
-   output breaks layout. Do not soften this rule.
+1. **Output Format**: Must be exactly `Implied price: $XXX,XXX - [ONE insight ≤100 chars]`.
+2. **Anchor Rule (α-Tuning)**: `new_price = α × fresh + (1-α) × prev_price`.
+   - **Stable Market (<2% prob shift)**: α = 0.70 / (1-α) = 0.30
+   - **Momentum Shift (2-10% prob shift)**: α = 0.85 / (1-α) = 0.15
+   - **Regime Change (>10% prob shift)**: α = 1.00 / (1-α) = 0.00
+3. **Concurrency Guard**: All writes to shared state (`ai_state`, `market_state`) MUST be wrapped in `threading.Lock()`.
+4. **Memory**: Rigid 16-message history window (8 user/assistant pairs) is required for trend tracking.
 
 ---
 
-## Diagnosis Decision Tree
+## Prediction Frameworks
 
-**Symptom → Root Cause → Fix**
-
-```
-Predictions jumping >$2k between cycles with no market move?
-  └─ Anchor weight too low
-     Fix: raise prev-prediction weight 30% → 40% in system prompt
-          add: "if Σ|Δp_i| < 3%, move ≤$800"
-
-AI output not matching regex / price not parsing?
-  └─ Format drift in model response
-     Fix: add few-shot examples to system prompt
-          tighten: "return ONLY the line below, no preamble"
-
-AI ignores previous predictions in follow-up turns?
-  └─ Conversation history not threading correctly
-     Fix: verify messages list is passed correctly in API call
-          check first-message guard (no prev to reference on turn 1)
-
-Terminal layout broken / text overflow?
-  └─ Insight string >100 chars or multi-line response
-     Fix: add hard truncation in wrap_ai_text() as safety net
-          tighten 100-char rule in system prompt
-
-Model swap needed (e.g. gpt-5-mini → Claude via OpenRouter)?
-  └─ See references/model-swap-guide.md
-```
+The AI analyzes data using six primary frameworks:
+- **PDF Analysis**: Interprets market brackets as a probability density function.
+- **Expected Value (EV)**: The probability-weighted mean is the core price anchor.
+- **Confidence Intervals**: 68% and 95% CI bounds derived from the distribution.
+- **Data Quality Gate**: AI flags if probabilities sum to >1.05 or <0.95 (arbitrage/stale data).
+- **Momentum**: Tracks probability flow between adjacent brackets.
+- **Volatility**: Uses reach/dip markets (e.g., Event 37057) as asymmetric tail signals.
 
 ---
 
-## System Prompt Architecture
+## Self-Reflection & Accuracy
 
-The system prompt defines the AI as a **quantitative Bitcoin price prediction
-specialist** using 6 frameworks. See
-`references/ai-system-architecture.md` for the full framework spec and
-tuning guidance.
-
-The **PRICE CONSISTENCY RULES** section is the most frequently tuned part.
-Template structure:
-
-```
-PRICE CONSISTENCY RULES:
-- Large price jumps (>$2000) require explicit justification
-- If Σ|Δprobability_i| < 2% → move ≤$1000
-- Weight previous prediction at [30–50]% unless regime change detected
-- Formula: new_price = α × fresh_calc + (1-α) × prev_price
-- Regime change = single bracket probability shift >15% in one cycle
-```
+The AI is instructed to reflect on its own performance. In subsequent turns, the prompt explicitly asks for:
+- "Reflection on how your previous predictions are performing."
+- This is achieved by passing the full conversation history where the AI can see its previous estimate and compare it to the "Current" market state.
 
 ---
 
-## Probability Synthesis Logic
+## Few-Shot Examples (System Prompt Tuning)
 
-Three event types feed the implied-price calculation:
+To ensure the rigid output format, use these examples in the prompt:
 
-| Event type | Role | Weight guidance |
-|------------|------|-----------------|
-| Broad ranges (e.g. 37049) | Wide anchor | baseline |
-| Fine ranges (e.g. 36060) | Precision pull | higher weight when available |
-| Reach/dip (e.g. 37057) | Tail signal | asymmetric — use for confidence interval only |
+- **First Turn**: "Analyze these markets... Provide implied price and brief reasoning."
+- **Subsequent Turns**: "Consider your previous analyses... Provide new price and reflection on accuracy."
 
-When fine and broad ranges disagree by >$1,500 → trust fine ranges.
-
----
-
-## Common Modification Patterns
-
-**Add confidence score to output:**
-```python
-# Change required format to:
-# Implied price: $XXX,XXX - [insight] (conf: XX%)
-# Update char limit: 100 → 115
-# Add instruction: "Append confidence 0-100% in parentheses at end"
-```
-
-**Increase stability (more conservative):**
-```python
-# Raise anchor weight: 30% → 45%
-# Add bracket: "if Σ|Δp_i| < 3%, max move = $500"
-```
-
-**Change model (OpenRouter):**
-```python
-# In poly_or.py, find: model = "moonshotai/kimi-k2"
-# Replace with target model string
-# Remove reasoning param if not supported
-# Update wrap_ai_text() prefix string
-# See references/model-swap-guide.md for full steps
-```
+**Output Requirement**:
+- ✅ `Implied price: $119,250 - 68% mass in 118-120k, mild upward momentum`
+- ❌ `The implied price is approximately $119,250. My analysis shows...`
 
 ---
 
-## Files Reference Map
+## Model Specific Tuning
 
-```
-poly_ui.py
-  fetch_event_markets()     ~line  35   Gamma API call, bracket parsing
-  fetch_price()             ~line  70   CLOB price fetch
-  spark_segments()          ~line  80   Sparkline generation
-  update_ai_analysis_async()~line 300   ★ SYSTEM PROMPT + AI CALL + MEMORY
-  extract_ai_price()        ~line 420   Regex price parser
-  wrap_ai_text()            ~line 435   Terminal text wrapper
-  draw_screen()             ~line 450   Curses layout engine
+### OpenAI (gpt-5-mini)
+- Uses `client.responses.create` with `reasoning={"effort": "high"}`.
+- High effort is required for stable mathematical synthesis.
 
-poly_or.py — identical structure, different AI call signature
-  update_ai_analysis_async() uses openai.OpenAI(base_url=OPENROUTER_BASE)
-  No reasoning parameter
-```
+### OpenRouter (moonshotai/kimi-k2)
+- Standard chat completions. Ensure no `reasoning=` parameter is passed to avoid API errors.
 
-For deep function-level detail see `references/function-reference.md`.
-
----
-
-## Validation
-
-Before shipping any system prompt change, run:
-
-```bash
-python scripts/validate_output_format.py "Implied price: $119,250 - 68% mass in 118-120k, mild upward momentum"
-# Expected: PASS
-python scripts/validate_output_format.py "The implied price is $119,250. Based on my analysis..."
-# Expected: FAIL — multi-sentence
-```
+→ For full system prompt specification → `references/ai-system-architecture.md`
