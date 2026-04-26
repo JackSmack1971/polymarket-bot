@@ -4,18 +4,18 @@ from src.core.config import EVENT_ID_FINE_RANGES, EVENT_ID_REACH_DIP
 
 class PredictionService:
     @staticmethod
-    def calculate_implied_price(brackets: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    def calculate_implied_price(
+        main_brackets: List[Dict[str, Any]], 
+        fine_ranges: List[Dict[str, Any]], 
+        reach_dip_data: List[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
         """Calculate implied Bitcoin price from market probabilities."""
         try:
-            # Get additional fine-grained data
-            fine_ranges = PolymarketRepository.fetch_event_markets(EVENT_ID_FINE_RANGES)
-            reach_dip_data = PolymarketRepository.fetch_event_markets(EVENT_ID_REACH_DIP)
-            
             ranges = []
             prob_sum_check = 0.0
             
             # 1. Main Event (Broad Ranges - 35% Trust)
-            for b in brackets:
+            for b in main_brackets:
                 if b.get("last_yes") is None: continue
                 bracket = b["bracket"].lower()
                 prob = b["last_yes"]

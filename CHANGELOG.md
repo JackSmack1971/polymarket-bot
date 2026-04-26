@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-04-26
+
+### Added
+- **Real-Time Market Updates**: Implemented `MarketWorker` for continuous order book polling (15s interval), fixing the stale data issue.
+- **Multi-Event Data Ingestion**: Automated structure and price fetching for fine-ranges (36060) and reach/dip (37057) markets.
+- **Thread Status Dashboard**: New TUI footer bar providing real-time health and latency metrics for all background workers (AI, MKT, CG).
+
+### Changed
+- **Stateless Prediction Service**: Refactored `PredictionService` to operate on thread-safe snapshots, improving concurrency performance.
+- **Enhanced Thread Safety**: Implemented `copy.deepcopy` for market state snapshots to eliminate race conditions between UI and AI threads.
+- **UI Data Flow**: Centralized price updates in the `MarketWorker`, ensuring visual consistency across sparklines and tables.
+
+### Fixed
+- **Stale Price Bug**: Resolved issue where market prices were only fetched at startup and never updated in the TUI.
+- **Concurrent Modification Errors**: Fixed potential crashes when iterating over market brackets during background updates.
+
 ## [2.0.0] - 2026-04-26
 
 ### Added

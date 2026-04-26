@@ -6,6 +6,10 @@ from typing import List, Optional, Dict, Any
 @dataclass
 class MarketState:
     current_data: Optional[Dict[str, Any]] = None
+    price_map: Dict[str, float] = field(default_factory=dict)
+    main_brackets: List[Dict[str, Any]] = field(default_factory=list)
+    fine_brackets: List[Dict[str, Any]] = field(default_factory=list)
+    tail_brackets: List[Dict[str, Any]] = field(default_factory=list)
     last_update: float = 0.0
     updating: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)

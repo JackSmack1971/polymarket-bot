@@ -2,6 +2,7 @@ import curses
 import time
 import threading
 from typing import Dict, Any, List
+import copy
 from src.core.state_manager import StateManager
 from src.repositories.polymarket import PolymarketRepository
 from src.repositories.coingecko import CoinGeckoRepository
@@ -9,6 +10,7 @@ from src.services.prediction_service import PredictionService
 from src.services.ai_service import AIService
 from src.ui.charts import ChartRenderer
 from src.ui.sparklines import SparklineGenerator
+from src.core.config import EVENT_ID_FINE_RANGES, EVENT_ID_REACH_DIP
 
 class TerminalUI:
     def __init__(self, event_id: int, provider: str, interval: int):
@@ -24,18 +26,24 @@ class TerminalUI:
     def _main_loop(self, stdscr):
         self._init_curses(stdscr)
         
-        # Initial data load
-        brackets = PolymarketRepository.fetch_event_markets(self.event_id)
-        for b in brackets:
+        # Initial data load into state
+        main_brackets = PolymarketRepository.fetch_event_markets(self.event_id)
+        for b in main_brackets:
             b["yes_hist"] = []
             b["last_yes"] = None
+        
+        with self.state.market.lock:
+            self.state.market.main_brackets = main_brackets
+            # Fetch secondary event structures too
+            self.state.market.fine_brackets = PolymarketRepository.fetch_event_markets(EVENT_ID_FINE_RANGES)
+            self.state.market.tail_brackets = PolymarketRepository.fetch_event_markets(EVENT_ID_REACH_DIP)
 
         while self.running:
             # Handle terminal resize
             h, w = stdscr.getmaxyx()
             
-            self._update_background_threads(brackets)
-            self._render(stdscr, h, w, brackets)
+            self._update_background_threads()
+            self._render(stdscr, h, w)
             
             stdscr.timeout(self.interval * 1000)
             ch = stdscr.getch()
@@ -58,22 +66,61 @@ class TerminalUI:
         # 8: Chart Lines
         curses.init_pair(8, curses.COLOR_MAGENTA, -1)
 
-    def _update_background_threads(self, brackets):
+    def _update_background_threads(self):
         # AI Update (every 30s)
         if not self.state.ai.updating and (time.time() - self.state.ai.last_update > 30):
             self.state.ai.updating = True
-            threading.Thread(target=self._ai_worker, args=(brackets,), daemon=True, name="AIWorker").start()
+            threading.Thread(target=self._ai_worker, daemon=True, name="AIWorker").start()
             
         # BTC Update (every 60s)
         if not self.state.btc.updating and (time.time() - self.state.btc.last_update > 60):
             self.state.btc.updating = True
             threading.Thread(target=self._btc_worker, daemon=True, name="BTCWorker").start()
 
-    def _ai_worker(self, brackets):
+        # Market Update (every 15s)
+        if not self.state.market.updating and (time.time() - self.state.market.last_update > 15):
+            self.state.market.updating = True
+            threading.Thread(target=self._market_worker, daemon=True, name="MarketWorker").start()
+
+    def _market_worker(self):
         try:
-            synthesis = PredictionService.calculate_implied_price(brackets)
+            # Get a snapshot of token IDs to check
+            with self.state.market.lock:
+                all_tokens = []
+                for brackets in [self.state.market.main_brackets, self.state.market.fine_brackets, self.state.market.tail_brackets]:
+                    for b in brackets:
+                        if b.get("yes_token"): all_tokens.append(b["yes_token"])
+            
+            new_prices = {}
+            for tid in set(all_tokens):
+                p = PolymarketRepository.fetch_price(tid)
+                if p is not None:
+                    new_prices[tid] = p
+            
+            with self.state.market.lock:
+                self.state.market.price_map.update(new_prices)
+                self.state.market.last_update = time.time()
+                # Update last_yes in all brackets for easier access
+                for brackets in [self.state.market.main_brackets, self.state.market.fine_brackets, self.state.market.tail_brackets]:
+                    for b in brackets:
+                        tid = b.get("yes_token")
+                        if tid in self.state.market.price_map:
+                            b["last_yes"] = self.state.market.price_map[tid]
+        finally:
+            with self.state.market.lock:
+                self.state.market.updating = False
+
+    def _ai_worker(self):
+        try:
+            # Take a thread-safe deep copy for analysis
+            with self.state.market.lock:
+                main = copy.deepcopy(self.state.market.main_brackets)
+                fine = copy.deepcopy(self.state.market.fine_brackets)
+                tail = copy.deepcopy(self.state.market.tail_brackets)
+
+            synthesis = PredictionService.calculate_implied_price(main, fine, tail)
             market_data = {
-                "main_event": brackets,
+                "main_event": main,
                 "mathematical_synthesis": synthesis,
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
             }
@@ -106,8 +153,12 @@ class TerminalUI:
             with self.state.btc.lock:
                 self.state.btc.updating = False
 
-    def _render(self, stdscr, h, w, brackets):
+    def _render(self, stdscr, h, w):
         stdscr.erase()
+        
+        # 0. Get Data Snapshots
+        with self.state.market.lock:
+            brackets = copy.deepcopy(self.state.market.main_brackets)
         
         # 1. Header
         tstamp = time.strftime("%H:%M:%S UTC", time.gmtime())
@@ -151,12 +202,15 @@ class TerminalUI:
                 row = table_start_row + 2 + i
                 if row >= h - 2: break
                 
-                # Fetch live price (simulated here for brevity, in reality use repo)
-                yp = b.get("last_yes", 0.0)
+                # Price is already updated in b["last_yes"] by MarketWorker
+                yp = b.get("last_yes", 0.0) or 0.0
                 
-                # Update history for sparkline
-                b["yes_hist"].append(yp)
-                b["yes_hist"] = b["yes_hist"][-30:]
+                # Update history for sparkline (we need to persist this in the state's original brackets)
+                with self.state.market.lock:
+                    orig_b = self.state.market.main_brackets[i]
+                    orig_b["yes_hist"].append(yp)
+                    orig_b["yes_hist"] = orig_b["yes_hist"][-30:]
+                    hist = list(orig_b["yes_hist"])
 
                 # Label
                 label = b["bracket"].replace("Will the price of Bitcoin be ", "")[:24]
@@ -165,7 +219,7 @@ class TerminalUI:
                     stdscr.addstr(row, 25, f"{yp:.3f}".ljust(10))
                     
                     # Sparkline
-                    segs = SparklineGenerator.get_segments(b["yes_hist"], width=15)
+                    segs = SparklineGenerator.get_segments(hist, width=15)
                     for j, (ch, delta) in enumerate(segs):
                         color = curses.color_pair(5 if delta > 0 else 6 if delta < 0 else 7)
                         stdscr.addstr(row, 40 + j, ch, color)
@@ -181,13 +235,32 @@ class TerminalUI:
             ai_hist, btc_hist = self.state.get_histories()
             ChartRenderer.draw_price_chart(stdscr, 1, sep_col + 2, w - sep_col - 3, h - 3, ai_hist, btc_hist)
 
-        # 6. Footer (BTC Price)
+        # 6. Footer (BTC Price & Thread Status)
         with self.state.btc.lock:
             btc_price = self.state.btc.price
+        
+        status_line = ""
+        # BTC
         if btc_price:
-            footer = f"REAL BTC: ${btc_price:,.2f}"
-            try: stdscr.addstr(h-1, 0, footer, curses.color_pair(1) | curses.A_BOLD)
-            except curses.error: pass
+            status_line += f"BTC: ${btc_price:,.0f} "
+        
+        # Thread health
+        now = time.time()
+        
+        def get_status(last_upd, interval, name):
+            if last_upd == 0: return f"{name}: WAIT"
+            diff = now - last_upd
+            if diff > interval * 2: return f"{name}: LAGGING"
+            return f"{name}: OK"
+
+        ai_status = get_status(self.state.ai.last_update, 30, "AI")
+        mkt_status = get_status(self.state.market.last_update, 15, "MKT")
+        btc_status = get_status(self.state.btc.last_update, 60, "CG")
+        
+        full_footer = f"{status_line} │ {ai_status} │ {mkt_status} │ {btc_status}"
+        try: 
+            stdscr.addstr(h-1, 0, full_footer[:w-1], curses.color_pair(1) | curses.A_BOLD)
+        except curses.error: pass
 
         stdscr.refresh()
 
