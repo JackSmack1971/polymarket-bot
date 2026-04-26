@@ -5,7 +5,7 @@ from src.core.config import GAMMA_BASE, CLOB_BASE
 class PolymarketRepository(BaseAPI):
     @classmethod
     def fetch_event_markets(cls, event_id: int):
-        """Return list of brackets with yes/no token IDs."""
+        """Return list of brackets with yes/no token IDs and volume metadata."""
         url = f"{GAMMA_BASE}/events/{event_id}"
         ev = cls.http_get_json(url)
         if not ev or "markets" not in ev:
@@ -29,7 +29,10 @@ class PolymarketRepository(BaseAPI):
                 "yes_token": tokens[0],
                 "no_token": tokens[1],
                 "yes_price": float(prices[0]) if prices else None,
-                "no_price": float(prices[1]) if prices else None
+                "no_price": float(prices[1]) if prices else None,
+                "volume": float(m.get("volume", 0.0)),
+                "liquidity": float(m.get("liquidity", 0.0)),
+                "end_date": m.get("endDate")
             })
             
         # Keep a logical order: <120k, 120-121k, ..., >123k

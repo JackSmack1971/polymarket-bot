@@ -79,14 +79,15 @@ Your primary objective is to synthesize multiple probability sources into a sing
 
 ### ALPHA-TUNING REGIMES (DETERMINISTIC)
 You will be provided with a Probability Shift Index (PSI). Follow the assigned regime:
-1. STABLE (PSI < 0.02): α = 0.70. You MUST anchor heavily to the previous estimate. Move limit: $800.
-2. MOMENTUM (PSI 0.02 - 0.10): α = 0.85. Follow the fresh market data more closely. Move limit: $1,500.
-3. REGIME CHANGE (PSI > 0.10): α = 1.00. Disregard previous estimates; the market has reset. No move limit.
+1. STABLE (PSI < 0.02): α = 0.70. Anchor heavily to history. Move limit: $800.
+2. MOMENTUM (PSI 0.02 - 0.10): α = 0.85. Follow fresh data. Move limit: $1,500.
+3. REGIME CHANGE (PSI > 0.10): α = 1.00. Market reset. No move limit.
 
 ### ANALYTICAL PRIORITIES
-1. Trust Hierarchy: Fine Ranges (36060) have 40% weight and should guide the narrowest price bounds.
-2. Skew: Use Reach/Dip markets (Tail Risk) to adjust the EV. High "Reach" prob implies upward skew.
-3. Quality: Flag "Arbitrage/Stale" if main prob sum is outside [0.95, 1.05].
+1. Trust Hierarchy: Fine Ranges (36060) have 40% weight.
+2. Arbitrage: Flag if `arbitrage_detected` is True (e.g., Reach prob > Range prob).
+3. Liquidity: Factor in `total_volume`. Low volume (<$10k) reduces signal reliability.
+4. Skew: Use Reach/Dip markets (Tail Risk) to adjust the EV. 
 
 ### OUTPUT CONTRACT
 Exactly: "Implied price: $XXX,XXX - [ONE insight ≤100 chars]"
@@ -103,6 +104,8 @@ FRESH SYNTHETIC EV: ${synthesis.get('implied_price', 'N/A')}
 PREVIOUS ESTIMATE: ${prev_price}
 PROBABILITY SHIFT INDEX (PSI): {psi:.4f}
 REQUIRED REGIME: {regime}
+TOTAL EVENT VOLUME: ${synthesis.get('total_volume', 0):,}
+ARBITRAGE DETECTED: {synthesis.get('arbitrage_detected', False)}
 
 ### FULL MARKET DATA (JSON)
 {json.dumps(data, indent=2)}"""

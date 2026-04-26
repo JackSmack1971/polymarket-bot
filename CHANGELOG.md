@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-04-26
+
+### Added
+- **Arbitrage Detection**: Implemented logic to detect contradictory market probabilities (e.g., Reach probabilities exceeding Range probabilities).
+- **Volume-Weighted Confidence**: Added liquidity analysis to the confidence score; predictions with low volume (<$10k) now carry a "Liquidity Discount."
+- **Metadata Expansion**: `PolymarketRepository` now captures real-time volume, liquidity, and expiry data for all markets.
+- **Source Discrepancy Gate**: Implemented a $2,000 threshold check between Fine and Broad ranges to flag potential data divergence.
+
+### Changed
+- **System Prompt v2.5**: Refined the AI's analytical framework to explicitly prioritize arbitrage and liquidity analysis.
+- **User Prompt Expansion**: Added `TOTAL_EVENT_VOLUME` and `ARBITRAGE_DETECTED` flags to the AI's real-time data snapshot.
+
+### Fixed
+- **Synthesis Math Overflow**: Fixed potential issues with non-normalized probability sums by implementing a stricter probability gate.
+- **Data Gaps**: Improved handling of missing volume or liquidity data in the repository layer.
+
 ## [2.2.0] - 2026-04-26
 
 ### Added
