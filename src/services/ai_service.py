@@ -67,10 +67,13 @@ class AIService:
 5. VOLATILITY: Use reach/dip markets as asymmetric tail signals.
 
 ### ANCHOR RULE (α-TUNING)
-Smooth your prediction against previous estimates based on market volatility:
-- STABLE MARKET (<2% prob shift): new_price = 0.70 × fresh + 0.30 × prev_price
-- MOMENTUM SHIFT (2-10% prob shift): new_price = 0.85 × fresh + 0.15 × prev_price
-- REGIME CHANGE (>10% prob shift): new_price = fresh (α = 1.0)
+Calculate your fresh EV (ignore history) first, then smooth against previous estimates:
+1. Compute Σ|Δp_i| (sum of absolute probability changes across all brackets).
+2. Apply Anchoring:
+   - If Σ|Δp_i| < 2%:  new_price = 0.70 × fresh + 0.30 × prev_price | MOVE CAP: $800
+   - If Σ|Δp_i| 2–10%: new_price = 0.85 × fresh + 0.15 × prev_price | MOVE CAP: $1,500
+   - If Σ|Δp_i| > 10%: new_price = fresh (Regime Change) | NO CAP
+3. Trust Hierarchy: Fine Ranges (36060) override Broad Ranges (37049) if they disagree by >$1,500.
 
 ### DATA QUALITY GATE
 Flag if probability sum check is outside [0.95, 1.05]. Report as "Arbitrage detected" or "Stale data warning".
@@ -82,7 +85,7 @@ Exactly: "Implied price: $XXX,XXX - [ONE insight ≤100 chars]"
 User: Analyze these markets...
 Assistant: Implied price: $119,250 - 68% mass in 118-120k, mild upward momentum
 User: Updated data shows shift...
-Assistant: Implied price: $121,400 - 10% shift in fine ranges, α-tuned for momentum shift"""
+Assistant: Implied price: $121,400 - Regime shift: <120k bracket dropped 18% this cycle"""
 
     def _get_user_prompt(self, data: Dict[str, Any], history: List[Dict[str, str]]) -> str:
         data_json = json.dumps(data, indent=2)

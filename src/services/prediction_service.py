@@ -77,7 +77,16 @@ class PredictionService:
             if not ranges:
                 return None
                 
-            # Calculate standard EV
+            # Calculate EVs per source for discrepancy detection
+            fine_ranges_list = [r for r in ranges if r["source"] == "fine"]
+            main_ranges_list = [r for r in ranges if r["source"] == "main"]
+            
+            fine_ev = sum(r["prob"] * r["mid"] for r in fine_ranges_list) / sum(r["prob"] for r in fine_ranges_list) if fine_ranges_list else None
+            main_ev = sum(r["prob"] * r["mid"] for r in main_ranges_list) / sum(r["prob"] for r in main_ranges_list) if main_ranges_list else None
+            
+            discrepancy = abs(fine_ev - main_ev) if fine_ev and main_ev else 0
+            
+            # Calculate standard combined EV
             total_weighted = sum(r["prob"] * r["mid"] for r in ranges)
             total_prob = sum(r["prob"] for r in ranges)
             implied_price = total_weighted / total_prob if total_prob > 0 else None
@@ -91,9 +100,10 @@ class PredictionService:
                 "max_prob_source": max_prob_range["source"] if max_prob_range else "unknown",
                 "prob_sum_check": round(prob_sum_check, 4),
                 "is_stable": 0.95 <= prob_sum_check <= 1.05,
+                "discrepancy": round(discrepancy),
                 "trust_distribution": {
-                    "fine": len([r for r in ranges if r["source"] == "fine"]),
-                    "main": len([r for r in ranges if r["source"] == "main"]),
+                    "fine": len(fine_ranges_list),
+                    "main": len(main_ranges_list),
                     "tail": len([r for r in ranges if r["source"] == "tail"])
                 }
             }
