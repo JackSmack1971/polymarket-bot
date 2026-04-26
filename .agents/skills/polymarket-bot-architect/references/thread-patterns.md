@@ -1,79 +1,66 @@
 # Thread Patterns Reference
 
 ## Table of Contents
-1. [Standard Async Function Template](#1-standard-async-function-template)
-2. [Adding a New Thread (4th Source)](#2-adding-a-new-thread-4th-source)
-3. [Binance Funding Rate Example](#3-binance-funding-rate-example)
-4. [Lock-Safe State Wrapper](#4-lock-safe-state-wrapper)
-5. [Graceful Degradation Pattern](#5-graceful-degradation-pattern)
-6. [Laggy UI Fixes](#6-laggy-ui-fixes)
+1. [Orchestrator Worker Template](#1-orchestrator-worker-template)
+2. [Data Snapshotting (Deepcopy)](#2-data-snapshotting-deepcopy)
+3. [Background Logging Pattern](#3-background-logging-pattern)
+4. [Curses Thread Safety](#4-curses-thread-safety)
 
 ---
 
----
+## 1. Orchestrator Worker Template
 
-## 1. Standard Async Function Template
-
-Every async function must use a `finally` block to ensure `updating = False` is reset even on failure.
+Every worker function must use a `finally` block and the appropriate `state.[category].lock`.
 
 ```python
-def update_source_async(state_dict):
+def _ai_worker(self):
     try:
-        # Do I/O here
-        result = fetch_data()
-        state_dict['data'] = result
-        state_dict['last_update'] = time.time()
+        # 1. Prepare data (Snapshotting)
+        with self.state.market.lock:
+            main = copy.deepcopy(self.state.market.main_brackets)
+            
+        # 2. Long running I/O (Outside lock)
+        result = self.ai_service.generate_analysis(main)
+        
+        # 3. Update state (Inside lock)
+        with self.state.ai.lock:
+            self.state.ai.analysis = result["content"]
+            self.state.ai.last_update = time.time()
+            
     except Exception as e:
-        state_dict['data'] = f"Error: {str(e)[:30]}"
+        logging.error(f"AIWorker Error: {e}")
     finally:
         # ALWAYS reset here, inside the thread
-        state_dict['updating'] = False
+        with self.state.ai.lock:
+            self.state.ai.updating = False
 ```
 
 ---
 
-## 2. Multi-Source Data Collection
+## 2. Data Snapshotting (Deepcopy)
 
-The `market_state` thread collects data from three separate events simultaneously.
+Use `copy.deepcopy` when taking data from one state (e.g., Market) to use in another (e.g., AI Analysis) to prevent the AI service from reading data that changes mid-execution.
 
 ```python
-def collect_market_data_async(brackets, event_id, market_state):
-    try:
-        # brackets list contains items from multiple event IDs:
-        # main_event + additional_event + reach_dip_event
-        current_data = format_market_data_for_ai(brackets, event_id)
-        if current_data["markets"]:
-            market_state['current_data'] = current_data
-            market_state['last_update'] = time.time()
-    finally:
-        market_state['updating'] = False
-
-# In main():
-all_brackets = brackets + additional_brackets + reach_dip_brackets
-threading.Thread(target=collect_market_data_async,
-                 args=(all_brackets, event_id, market_state),
-                 daemon=True).start()
+with self.state.market.lock:
+    # Snapshotting prevents race conditions during the 5-10s AI call
+    main_snapshot = copy.deepcopy(self.state.market.main_brackets)
+    fine_snapshot = copy.deepcopy(self.state.market.fine_brackets)
 ```
 
 ---
 
-## 3. Lock-Safe State Wrapper
+## 3. Background Logging Pattern
 
-Crucial for production stability. Initialize one lock in `main()` and use it for all writes.
+Since background threads don't output to the TUI terminal, use `logging` to capture errors.
 
 ```python
-state_lock = threading.Lock()
+import logging
+logging.basicConfig(filename='bot.log', level=logging.INFO)
 
-# Inside any async thread:
-def update_ai_analysis_async(current_data, previous_data, ai_state):
-    try:
-        # ... fetch response ...
-        with state_lock:
-            ai_state['analysis'] = response.output_text.strip()
-            ai_state['last_update'] = time.time()
-    finally:
-        with state_lock:
-            ai_state['updating'] = False
+# Inside worker
+except Exception as e:
+    logging.error(f"Worker Exception: {e}", exc_info=True)
 ```
 
 ---
@@ -85,11 +72,12 @@ def update_ai_analysis_async(current_data, previous_data, ai_state):
 ```python
 # RIGHT: Draw in the main thread loop
 while True:
-    draw_ui(stdscr, ai_state, market_state) # Main thread only
+    draw_ui(stdscr, state) # Main thread only
     stdscr.refresh()
     key = stdscr.getch()
 
 # WRONG: Do not do this
-def thread_fn():
+def _worker_method(self):
     stdscr.addstr(...) # CRASH
 ```
+

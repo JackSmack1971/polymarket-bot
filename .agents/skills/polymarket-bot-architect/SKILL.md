@@ -6,27 +6,27 @@ description: Guides development of the Polymarket curses TUI bot with daemon-thr
 # Polymarket Bot Architect — Working Knowledge (v3.0)
 
 ## Architecture Overview
-Pure `curses` TUI with independent daemon threads for data ingestion. **V3.0 mandates Thread-Safe state management.**
+Pure `curses` TUI with independent daemon threads for data ingestion. **V3.0 mandates modular R-C-S-R and Thread-Safe state management via `StateManager`.**
 
-| Thread | Interval | State Dict | Source | Lock Required |
+| Thread | Interval | State Object | Source | Lock Required |
 |---|---|---|---|---|
-| Market Data | 25s | `market_state` | Gamma + CLOB | `market_lock` |
-| AI Analysis | 30s | `ai_state` | OpenAI/OpenRouter | `ai_lock` |
-| BTC Price | 60s | `btc_state` | CoinGecko | `btc_lock` |
+| Market Data | 15s | `state.market` | Gamma + CLOB | `state.market.lock` |
+| AI Analysis | 30s | `state.ai` | OpenAI/OpenRouter | `state.ai.lock` |
+| BTC Price | 60s | `state.btc` | CoinGecko | `state.btc.lock` |
 
 ---
 
 ## 1. The Golden Threading Rules (CRITICAL)
 
-### A. The Global Threading Lock
-Every shared state dictionary **MUST** be protected by a `threading.Lock()`.
-- **Read/Write**: Always use `with state_lock:` when updating or reading multiple keys from a state dict.
-- **Priority**: This is the top priority for production stability before adding concurrent data sources.
+### A. The StateManager & Dataclass Locks
+Every shared state container is a dataclass protected by its own `threading.Lock()`.
+- **Read/Write**: Always use `with state.[category].lock:` when updating or reading multiple attributes.
+- **Access**: Use attribute access (`state.market.price_map`) instead of dictionary keys.
 
 ### B. The `updating = False` Pattern
 Never set `updating = False` in the main loop or immediately after `thread.start()`.
-- **Mandate**: It must be the **final statement** inside the `finally` block of the async function itself.
-- **Reason**: Ensures the flag is reset even if an exception occurs, preventing deadlocks in data fetching.
+- **Mandate**: It must be the **final statement** inside the `finally` block of the worker function itself.
+- **Context**: Wrap it in a lock if the flag is part of the protected state.
 
 ---
 
@@ -41,12 +41,12 @@ Before implementing new features or adding data sources, evaluate the risk:
 
 ---
 
-## 3. Architectural Evolution (Pythonic R-C-S-R)
-Move away from monolithic files (`poly_ui.py`) towards a modular structure:
-- **Repositories**: `api_client.py` (Gamma/CLOB/CoinGecko logic).
-- **Services**: `prediction_logic.py` (Implied price calculations).
-- **Controllers**: `state_manager.py` (Threading orchestration and Locks).
-- **Render**: `ui_engine.py` (Pure curses draw calls).
+## 3. Modular R-C-S-R Structure
+The codebase is strictly separated into `src/` layers:
+- **Repositories**: `src/repositories/` (Polymarket, CoinGecko logic).
+- **Services**: `src/services/` (AI analysis, price prediction math).
+- **Core**: `src/core/` (StateManager, Orchestrator, Config).
+- **UI**: `src/ui/` (Pure curses engine).
 
 ---
 
@@ -66,3 +66,4 @@ AI Analysis **MUST** adhere to the `GEMINI.md` contract:
 → For lock templates → `references/threading-locks.md`
 → For API pattern contracts → `references/api-endpoints.md`
 → For threading templates → `references/thread-patterns.md`
+

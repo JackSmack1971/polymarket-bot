@@ -4,10 +4,8 @@
 1. [Polymarket Gamma API](#1-polymarket-gamma-api)
 2. [Polymarket CLOB API](#2-polymarket-clob-api)
 3. [CoinGecko BTC Price](#3-coingecko-btc-price)
-4. [OpenAI Responses API Pattern](#4-openai-responses-api-pattern)
-5. [OpenRouter Fallback Pattern](#5-openrouter-fallback-pattern)
-
----
+4. [AI Model Identifiers](#4-ai-model-identifiers)
+5. [α-Tuning & Regime Logic](#5-%CE%B1-tuning--regime-logic)
 
 ---
 
@@ -23,11 +21,11 @@ GET /markets/{market_id}       → single market detail
 ### Event IDs & Sources
 | ID | Category | Usage | Role |
 |---|---|---|---|
-| **User Defined** | Variable | `main -e ID` | Primary prediction target |
+| **User Defined** | Variable | `main.py -e ID` | Primary prediction target |
 | **36060** | Fine Ranges | Hardcoded | Precision calibration ($2k brackets) |
 | **37057** | Reach/Dip | Hardcoded | Volatility & tail risk signals |
 
-**Note**: All three events are synthesized in `collect_market_data_async` to form the `current_data` snapshot for the AI.
+**Note**: All three events are synthesized in `PredictionService.calculate_implied_price`.
 
 ---
 
@@ -42,44 +40,42 @@ GET /price?token_id={id}&side=SELL  → {"price": "0.70"}
 
 ---
 
-## 3. Implied Price Logic
+## 3. Implied Price Logic (PredictionService)
 
-The function `calculate_implied_bitcoin_price(brackets)` synthesizes data:
+The function `calculate_implied_price(main, fine, tail)` in `src/services/prediction_service.py` synthesizes data:
 1. **Extract Midpoints**: Parse labels (e.g., "$120-121k" → 120500).
 2. **Collect Probabilities**: Get `last_yes` price for each bracket.
 3. **Weight Ranges**: Combine Broad, Fine, and Reach/Dip ranges.
-4. **Calculate Mean**: `Σ(midpoint * prob) / Σ(probs)`.
+4. **Calculate PSI**: Probability Shift Index measures divergence from previous distribution.
 
 ---
 
-## 4. AI Call Patterns
+## 4. AI Model Identifiers
 
-### OpenAI Reasoning API (poly_ui.py)
-Used for deep analysis of probability distributions.
+### OpenAI (AIService)
+Used for deep reasoning via the Responses API.
+- **Model**: `gpt-5-mini`
+- **Reasoning**: `{"effort": "high"}`
 
+### OpenRouter (AIService)
+Fallback for specific models.
+- **Model**: `moonshotai/kimi-k2`
+
+---
+
+## 5. α-Tuning & Regime Logic
+
+AI Analysis follows a deterministic regime based on PSI:
+1. **STABLE** (PSI < 0.02): α = 0.70. Anchor to history. Move limit: $800.
+2. **MOMENTUM** (PSI 0.02 - 0.10): α = 0.85. Follow fresh data. Move limit: $1,500.
+3. **REGIME CHANGE** (PSI > 0.10): α = 1.00. Market reset. No move limit.
+
+---
+
+## 6. Conversation History
+History is sliced to `[-16:]` (8 pairs) to maintain context.
 ```python
-model = "gpt-5-mini"
-effort = "high"
-response = client.responses.create(
-    model=model,
-    reasoning={"effort": effort},
-    input=messages
-)
+# Inside AIService.generate_analysis
+messages.extend(history[-16:]) 
 ```
 
-### OpenRouter (poly_or.py)
-Used for model flexibility (e.g., Moonshot Kimi).
-
-```python
-model = "moonshotai/kimi-k2"
-response = client.chat.completions.create(
-    model=model,
-    messages=messages
-)
-```
-
-### Conversation History
-History is sliced to `[-16:]` (8 pairs) to maintain context without exceeding token limits.
-```python
-ai_state['conversation_history'] = ai_state['conversation_history'][-16:]
-```

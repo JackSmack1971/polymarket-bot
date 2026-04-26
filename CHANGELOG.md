@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-04-26
+
+### Added
+- **Resilient Initial Loader**: Implemented an automatic retry loop for the initial market data fetch, ensuring the bot starts reliably even during transient network failures.
+- **Centralized Model Config**: Moved AI model selection to `src/core/config.py` for easier configuration.
+
+### Changed
+- **AI Contract Alignment**: Standardized AI price extraction regex and output cleaning to strictly adhere to `GEMINI.md` v3.0 guardrails.
+- **OpenAI SDK Standardization**: Migrated from non-standard `responses` API to standard `chat.completions` for improved stability and library compatibility.
+
+### Fixed
+- **Price Clamping Logic**: Corrected an issue where move-limit caps were calculated using unparsed price strings.
+- **Duplicate Logic**: Removed redundant `try` blocks in the AI service layer.
+
 ## [3.0.0] - 2026-04-26
 
 ### Added

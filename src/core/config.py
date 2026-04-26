@@ -25,3 +25,7 @@ load_env()
 
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
+
+# Model Selection
+DEFAULT_OPENAI_MODEL = "o3-mini"
+DEFAULT_OPENROUTER_MODEL = "moonshotai/kimi-k2"

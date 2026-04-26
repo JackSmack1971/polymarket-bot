@@ -3,20 +3,25 @@ import time
 import re
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
-from src.core.config import OPENAI_API_KEY, OPENROUTER_API_KEY
+from src.core.config import (
+    OPENAI_API_KEY, 
+    OPENROUTER_API_KEY,
+    DEFAULT_OPENAI_MODEL,
+    DEFAULT_OPENROUTER_MODEL
+)
 
 class AIService:
     def __init__(self, provider: str = "openai"):
         self.provider = provider
         if provider == "openai":
             self.client = OpenAI(api_key=OPENAI_API_KEY)
-            self.model = "gpt-5-mini" 
+            self.model = DEFAULT_OPENAI_MODEL 
         else:
             self.client = OpenAI(
                 base_url="https://openrouter.ai/api/v1",
                 api_key=OPENROUTER_API_KEY
             )
-            self.model = "moonshotai/kimi-k2"
+            self.model = DEFAULT_OPENROUTER_MODEL
 
     def generate_analysis(self, current_data: Dict[str, Any], history: List[Dict[str, str]], last_metadata: Dict[str, Any]) -> Dict[str, Any]:
         """Generate AI market analysis with deterministic α-Tuning integration."""
@@ -29,28 +34,22 @@ class AIService:
         messages.append({"role": "user", "content": user_prompt})
         
         try:
-            if self.provider == "openai":
-                response = self.client.responses.create(
-                    model=self.model,
-                    reasoning={"effort": "high"},
-                    input=messages
-                )
-                content = response.output_text.strip()
-                effort = "high"
-            else:
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages
-                )
-                content = response.choices[0].message.content.strip()
-                effort = ""
+            # Standard Chat Completions for both providers
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                **({"reasoning_effort": "high"} if self.provider == "openai" and "o3" in self.model else {})
+            )
+            content = response.choices[0].message.content.strip()
+            effort = "high" if self.provider == "openai" and "o3" in self.model else ""
                 
-            content = content.replace('$', '').replace(',', '')
-            price_match = re.search(r'price: ([0-9]+)', content.lower())
+            # Contract: "Implied price: $XXX,XXX - [ONE insight ≤100 chars]"
+            # Regex: r'\$([0-9,]+)' is the gold standard
+            price_match = re.search(r'\$([0-9,]+)', content)
             
             # Move Cap Enforcement
             if price_match and last_metadata.get("prev_price"):
-                new_p = float(price_match.group(1))
+                new_p = float(price_match.group(1).replace(',', ''))
                 prev_p = last_metadata["prev_price"]
                 psi = current_data.get("mathematical_synthesis", {}).get("psi", 0.0)
                 

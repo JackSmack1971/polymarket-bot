@@ -32,21 +32,28 @@ class ThreadOrchestrator:
         logging.info("ThreadOrchestrator stopping...")
 
     def _initial_load(self):
-        try:
-            logging.info("Performing initial market load...")
-            main_brackets = PolymarketRepository.fetch_event_markets(self.event_id)
-            for b in main_brackets:
-                b["yes_hist"] = []
-                b["last_yes"] = None
-            
-            with self.state.market.lock:
-                self.state.market.main_brackets = main_brackets
-                self.state.market.fine_brackets = PolymarketRepository.fetch_event_markets(EVENT_ID_FINE_RANGES)
-                self.state.market.tail_brackets = PolymarketRepository.fetch_event_markets(EVENT_ID_REACH_DIP)
-                self.state.market.last_update = time.time()
-            logging.info("Initial market load complete.")
-        except Exception as e:
-            logging.error(f"Initial load failed: {e}", exc_info=True)
+        while self.running:
+            try:
+                logging.info("Performing initial market load...")
+                main_brackets = PolymarketRepository.fetch_event_markets(self.event_id)
+                if not main_brackets:
+                    raise ValueError("Main event markets empty")
+                
+                for b in main_brackets:
+                    b["yes_hist"] = []
+                    b["last_yes"] = None
+                
+                with self.state.market.lock:
+                    self.state.market.main_brackets = main_brackets
+                    self.state.market.fine_brackets = PolymarketRepository.fetch_event_markets(EVENT_ID_FINE_RANGES)
+                    self.state.market.tail_brackets = PolymarketRepository.fetch_event_markets(EVENT_ID_REACH_DIP)
+                    self.state.market.last_update = time.time()
+                
+                logging.info("Initial market load complete.")
+                break # Exit loop on success
+            except Exception as e:
+                logging.error(f"Initial load failed: {e}. Retrying in 5s...")
+                time.sleep(5)
 
     def _orchestrator_loop(self):
         while self.running:
