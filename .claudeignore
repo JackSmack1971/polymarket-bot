@@ -1,0 +1,40 @@
+# .claudeignore — Aperture Token Exclusion Map
+# Pre-emptive filter for high-token/low-signal paths
+
+# Dependency Trees
+node_modules/
+vendor/
+.venv/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build & Cache
+dist/
+build/
+.next/
+.turbo/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Logs & Secrets
+*.log
+.env
+.env.*
+*.pem
+*.key
+secrets/
+
+# Binaries & Large Assets
+*.bin
+*.exe
+*.db
+*.sqlite
+*.wasm
+*.pdf
+*.zip
+
+# Volatile Framework State
+.claude/snapshots/
+.claude/compiled/

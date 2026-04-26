@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+
+  "permissions": {
+    "allow": [
+      "Bash(npm *)",
+      "Bash(git *)",
+      "Bash(python *)",
+      "Bash(pip *)",
+      "Read(*)",
+      "Write(*)",
+      "Edit(*)",
+      "MultiEdit(*)"
+    ],
+    "ask": [
+      "Bash(rm *)",
+      "Bash(git push *)",
+      "Bash(curl *)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(./secrets/**)",
+      "Read(./config/credentials*)",
+      "Bash(rm -rf *)"
+    ]
+  },
+
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'APERTURE-CLEAN: Session active. Verify context with /tokens. Review FAILURE_LEDGER.md for anti-patterns. Domain skills will load on path entry.'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/pre-compact.sh",
+            "timeout": 45,
+            "statusMessage": "APERTURE-CLEAN: Extracting systemic failures and generating preserve list..."
+          }
+        ]
+      }
+    ],
+
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/pre-tool-use.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
