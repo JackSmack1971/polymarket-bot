@@ -1,7 +1,7 @@
 import curses
 import time
 import threading
-from typing import Dict, Any
+from typing import Dict, Any, List
 from src.core.state_manager import StateManager
 from src.repositories.polymarket import PolymarketRepository
 from src.repositories.coingecko import CoinGeckoRepository
@@ -31,8 +31,11 @@ class TerminalUI:
             b["last_yes"] = None
 
         while self.running:
+            # Handle terminal resize
+            h, w = stdscr.getmaxyx()
+            
             self._update_background_threads(brackets)
-            self._render(stdscr, brackets)
+            self._render(stdscr, h, w, brackets)
             
             stdscr.timeout(self.interval * 1000)
             ch = stdscr.getch()
@@ -42,49 +45,49 @@ class TerminalUI:
     def _init_curses(self, stdscr):
         curses.curs_set(0)
         curses.use_default_colors()
-        curses.init_pair(1, curses.COLOR_GREEN, -1)
-        curses.init_pair(2, curses.COLOR_RED, -1)
-        curses.init_pair(3, curses.COLOR_YELLOW, -1)
+        # 1-3: Directions
+        curses.init_pair(1, curses.COLOR_GREEN, -1)  # UP
+        curses.init_pair(2, curses.COLOR_RED, -1)    # DOWN
+        curses.init_pair(3, curses.COLOR_YELLOW, -1) # FLAT
+        # 4: Borders/Headings
         curses.init_pair(4, curses.COLOR_CYAN, -1)
+        # 5-7: Sparklines
+        curses.init_pair(5, curses.COLOR_GREEN, -1)
+        curses.init_pair(6, curses.COLOR_RED, -1)
+        curses.init_pair(7, -1, -1) # Default
+        # 8: Chart Lines
+        curses.init_pair(8, curses.COLOR_MAGENTA, -1)
 
     def _update_background_threads(self, brackets):
-        # AI Update
+        # AI Update (every 30s)
         if not self.state.ai.updating and (time.time() - self.state.ai.last_update > 30):
             self.state.ai.updating = True
-            threading.Thread(target=self._ai_worker, args=(brackets,), daemon=True).start()
+            threading.Thread(target=self._ai_worker, args=(brackets,), daemon=True, name="AIWorker").start()
             
-        # BTC Update
+        # BTC Update (every 60s)
         if not self.state.btc.updating and (time.time() - self.state.btc.last_update > 60):
             self.state.btc.updating = True
-            threading.Thread(target=self._btc_worker, daemon=True).start()
+            threading.Thread(target=self._btc_worker, daemon=True, name="BTCWorker").start()
 
     def _ai_worker(self, brackets):
         try:
-            # Mathematical synthesis
             synthesis = PredictionService.calculate_implied_price(brackets)
-            
-            # Format data for AI
             market_data = {
                 "main_event": brackets,
                 "mathematical_synthesis": synthesis,
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
             }
-            
             result = self.ai_service.generate_analysis(market_data, self.state.ai.conversation_history)
             
             with self.state.ai.lock:
                 self.state.ai.analysis = result["content"]
                 self.state.ai.model = result.get("model", "AI")
+                self.state.ai.effort = result.get("effort", "")
                 self.state.ai.last_update = time.time()
-                
-                # Update conversation history with the user prompt context
                 self.state.ai.conversation_history.append({"role": "user", "content": f"Analyze: {market_data.get('timestamp')}"})
                 self.state.ai.conversation_history.append({"role": "assistant", "content": result["content"]})
-                
-                # Keep history window at 16 messages
                 if len(self.state.ai.conversation_history) > 16:
                     self.state.ai.conversation_history = self.state.ai.conversation_history[-16:]
-                
                 price = AIService.extract_price(result["content"])
                 if price: self.state.update_ai_history(price)
         finally:
@@ -103,16 +106,101 @@ class TerminalUI:
             with self.state.btc.lock:
                 self.state.btc.updating = False
 
-    def _render(self, stdscr, brackets):
-        h, w = stdscr.getmaxyx()
+    def _render(self, stdscr, h, w, brackets):
         stdscr.erase()
         
-        # Header
-        tstamp = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
-        header = f"▓▓▓ POLYMARKET TERMINAL ▓▓▓  Event {self.event_id}  {tstamp} [q: quit]"
-        stdscr.addstr(0, 0, header[:w-1], curses.color_pair(4) | curses.A_BOLD)
-        
-        # Draw AI, Markets, and Chart...
-        # (Complete render logic logic here)
-        
+        # 1. Header
+        tstamp = time.strftime("%H:%M:%S UTC", time.gmtime())
+        header = f"▓▓▓ POLYMARKET TERMINAL ▓▓▓  E:{self.event_id}  {tstamp}  [q: quit]"
+        try:
+            stdscr.addstr(0, 0, header[:w-1], curses.color_pair(4) | curses.A_BOLD)
+        except curses.error: pass
+
+        # Layout constants
+        sep_col = min(72, w * 5 // 8)
+        ai_w = sep_col - 2
+
+        # 2. AI Analysis Panel (Top Left)
+        with self.state.ai.lock:
+            analysis_text = self.state.ai.analysis
+            model_info = self.state.ai.model
+            effort = self.state.ai.effort
+
+        ai_lines = self._wrap_text(analysis_text, ai_w, model_info, effort)
+        for i, line in enumerate(ai_lines):
+            if 1 + i < h - 2:
+                try:
+                    # Color the model prefix
+                    prefix_end = line.find(']> ') + 3 if ']> ' in line else 0
+                    if prefix_end > 0:
+                        stdscr.addstr(1+i, 0, line[:prefix_end], curses.color_pair(1) | curses.A_BOLD)
+                        stdscr.addstr(1+i, prefix_end, line[prefix_end:], curses.color_pair(3) | curses.A_ITALIC)
+                    else:
+                        stdscr.addstr(1+i, 0, line, curses.color_pair(3) | curses.A_ITALIC)
+                except curses.error: pass
+
+        # 3. Market Data Panel (Bottom Left)
+        table_start_row = 1 + len(ai_lines) + 1
+        if table_start_row < h - 5:
+            try:
+                stdscr.addstr(table_start_row, 0, "BRACKET".ljust(25) + "YES".ljust(10) + "DIR".ljust(5) + "TREND", curses.color_pair(4))
+                stdscr.hline(table_start_row + 1, 0, ord('─'), sep_col - 1)
+            except curses.error: pass
+
+            for i, b in enumerate(brackets):
+                row = table_start_row + 2 + i
+                if row >= h - 2: break
+                
+                # Fetch live price (simulated here for brevity, in reality use repo)
+                yp = b.get("last_yes", 0.0)
+                
+                # Update history for sparkline
+                b["yes_hist"].append(yp)
+                b["yes_hist"] = b["yes_hist"][-30:]
+
+                # Label
+                label = b["bracket"].replace("Will the price of Bitcoin be ", "")[:24]
+                try:
+                    stdscr.addstr(row, 0, label.ljust(25))
+                    stdscr.addstr(row, 25, f"{yp:.3f}".ljust(10))
+                    
+                    # Sparkline
+                    segs = SparklineGenerator.get_segments(b["yes_hist"], width=15)
+                    for j, (ch, delta) in enumerate(segs):
+                        color = curses.color_pair(5 if delta > 0 else 6 if delta < 0 else 7)
+                        stdscr.addstr(row, 40 + j, ch, color)
+                except curses.error: pass
+
+        # 4. Vertical Separator
+        for r in range(1, h-1):
+            try: stdscr.addstr(r, sep_col, "│", curses.color_pair(4))
+            except curses.error: pass
+
+        # 5. Chart Panel (Right)
+        if w > 95:
+            ai_hist, btc_hist = self.state.get_histories()
+            ChartRenderer.draw_price_chart(stdscr, 1, sep_col + 2, w - sep_col - 3, h - 3, ai_hist, btc_hist)
+
+        # 6. Footer (BTC Price)
+        with self.state.btc.lock:
+            btc_price = self.state.btc.price
+        if btc_price:
+            footer = f"REAL BTC: ${btc_price:,.2f}"
+            try: stdscr.addstr(h-1, 0, footer, curses.color_pair(1) | curses.A_BOLD)
+            except curses.error: pass
+
         stdscr.refresh()
+
+    def _wrap_text(self, text, width, model, effort):
+        prefix = f"[{model}{'-'+effort if effort else ''}]> "
+        words = text.split()
+        lines = []
+        cur = prefix
+        for w in words:
+            if len(cur + w) + 1 <= width:
+                cur += (w if cur == prefix else " " + w)
+            else:
+                lines.append(cur)
+                cur = "    " + w
+        if cur: lines.append(cur)
+        return lines
