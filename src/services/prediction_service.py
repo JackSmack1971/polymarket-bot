@@ -12,6 +12,7 @@ class PredictionService:
             reach_dip_data = PolymarketRepository.fetch_event_markets(EVENT_ID_REACH_DIP)
             
             ranges = []
+            prob_sum_check = 0.0
             
             # 1. Main Event (Broad Ranges)
             for b in brackets:
@@ -29,8 +30,12 @@ class PredictionService:
                     ranges.append({"mid": 122500, "prob": prob, "source": "main"})
                 elif "greater than" in bracket and "123" in bracket:
                     ranges.append({"mid": 125000, "prob": prob, "source": "main"})
+                
+                # Check for broad range probability sum consistency
+                if any(x in bracket for x in ["less than", "between", "greater than"]):
+                    prob_sum_check += prob
 
-            # 2. Fine Ranges
+            # 2. Fine Ranges ($110k - $120k+)
             for f in fine_ranges:
                 bracket = f["bracket"].lower()
                 prob = f["yes_price"]
@@ -40,19 +45,32 @@ class PredictionService:
                     ranges.append({"mid": 105000, "prob": prob, "source": "fine"})
                 elif "between" in bracket and "110" in bracket and "112" in bracket:
                     ranges.append({"mid": 111000, "prob": prob, "source": "fine"})
-                # ... other ranges follow same pattern ...
-                # (Simplified for brevity in the service, but should be complete)
+                elif "between" in bracket and "112" in bracket and "114" in bracket:
+                    ranges.append({"mid": 113000, "prob": prob, "source": "fine"})
+                elif "between" in bracket and "114" in bracket and "116" in bracket:
+                    ranges.append({"mid": 115000, "prob": prob, "source": "fine"})
+                elif "between" in bracket and "116" in bracket and "118" in bracket:
+                    ranges.append({"mid": 117000, "prob": prob, "source": "fine"})
+                elif "greater than" in bracket and "118" in bracket:
+                    ranges.append({"mid": 120000, "prob": prob, "source": "fine"})
 
-            # 3. Reach/Dip
+            # 3. Reach/Dip (Volatility Indicators)
             for r in reach_dip_data:
                 bracket = r["bracket"].lower()
                 prob = r["yes_price"]
                 if prob is None: continue
                 
+                # These indicate asymmetric tail risk
                 if "reach" in bracket and "$127k" in bracket:
-                    ranges.append({"mid": 127000, "prob": prob, "source": "volatility"})
+                    ranges.append({"mid": 127000, "prob": prob, "source": "tail"})
                 elif "reach" in bracket and "$125k" in bracket:
-                    ranges.append({"mid": 125000, "prob": prob, "source": "volatility"})
+                    ranges.append({"mid": 125000, "prob": prob, "source": "tail"})
+                elif "reach" in bracket and "$123k" in bracket:
+                    ranges.append({"mid": 123000, "prob": prob, "source": "tail"})
+                elif "dip to" in bracket and "$118k" in bracket:
+                    ranges.append({"mid": 118000, "prob": prob, "source": "tail"})
+                elif "dip to" in bracket and "$116k" in bracket:
+                    ranges.append({"mid": 116000, "prob": prob, "source": "tail"})
 
             if not ranges:
                 return None
@@ -67,7 +85,9 @@ class PredictionService:
                 return {
                     "implied_price": round(implied_price),
                     "max_prob": round(max_prob_range["prob"], 3),
-                    "sample_count": len(ranges)
+                    "sample_count": len(ranges),
+                    "prob_sum_check": round(prob_sum_check, 4),
+                    "is_stable": 0.95 <= prob_sum_check <= 1.05
                 }
         except Exception:
             pass

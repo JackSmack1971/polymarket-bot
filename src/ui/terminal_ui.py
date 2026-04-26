@@ -60,15 +60,30 @@ class TerminalUI:
 
     def _ai_worker(self, brackets):
         try:
+            # Mathematical synthesis
+            synthesis = PredictionService.calculate_implied_price(brackets)
+            
             # Format data for AI
-            market_data = {"markets": brackets} # Simplified
+            market_data = {
+                "main_event": brackets,
+                "mathematical_synthesis": synthesis,
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+            }
+            
             result = self.ai_service.generate_analysis(market_data, self.state.ai.conversation_history)
             
             with self.state.ai.lock:
                 self.state.ai.analysis = result["content"]
                 self.state.ai.model = result.get("model", "AI")
                 self.state.ai.last_update = time.time()
+                
+                # Update conversation history with the user prompt context
+                self.state.ai.conversation_history.append({"role": "user", "content": f"Analyze: {market_data.get('timestamp')}"})
                 self.state.ai.conversation_history.append({"role": "assistant", "content": result["content"]})
+                
+                # Keep history window at 16 messages
+                if len(self.state.ai.conversation_history) > 16:
+                    self.state.ai.conversation_history = self.state.ai.conversation_history[-16:]
                 
                 price = AIService.extract_price(result["content"])
                 if price: self.state.update_ai_history(price)
