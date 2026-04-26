@@ -6,8 +6,10 @@ from typing import Dict, Any, List, Optional
 from src.core.state_manager import StateManager
 from src.repositories.polymarket import PolymarketRepository
 from src.repositories.coingecko import CoinGeckoRepository
+from src.repositories.news import NewsRepository
 from src.services.prediction_service import PredictionService
 from src.services.ai_service import AIService
+from src.services.evaluation_service import EvaluationService
 from src.core.config import EVENT_ID_FINE_RANGES, EVENT_ID_REACH_DIP
 
 class ThreadOrchestrator:
@@ -83,6 +85,11 @@ class ThreadOrchestrator:
             self.state.btc.updating = True
             threading.Thread(target=self._btc_worker, daemon=True, name="BTCWorker").start()
 
+        # News Update (every 300s)
+        if not self.state.news.updating and (now - self.state.news.last_update > 300):
+            self.state.news.updating = True
+            threading.Thread(target=self._news_worker, daemon=True, name="NewsWorker").start()
+
     def _market_worker(self):
         try:
             # Snapshot token IDs
@@ -134,27 +141,41 @@ class ThreadOrchestrator:
                 "mathematical_synthesis": synthesis,
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
             }
+            # Inject latest news headlines into market data
+            with self.state.news.lock:
+                headlines = list(self.state.news.headlines)
+            if headlines:
+                market_data["news_context"] = headlines
+
             result = self.ai_service.generate_analysis(market_data, self.state.ai.conversation_history, prev_meta)
-            
-            price = AIService.extract_price(result["content"])
-            
+
+            implied_price = result.get("implied_price")
+            # Fallback: try regex if structured output unavailable
+            if not implied_price:
+                implied_price = AIService.extract_price(result["content"])
+
             with self.state.ai.lock:
                 self.state.ai.analysis = result["content"]
                 self.state.ai.model = result.get("model", "AI")
-                self.state.ai.effort = result.get("effort", "")
+                self.state.ai.internal_audit = result.get("internal_audit", "")
                 self.state.ai.last_update = time.time()
                 self.state.ai.conversation_history.append({"role": "user", "content": f"Analyze: {market_data.get('timestamp')}"})
                 self.state.ai.conversation_history.append({"role": "assistant", "content": result["content"]})
                 if len(self.state.ai.conversation_history) > 16:
                     self.state.ai.conversation_history = self.state.ai.conversation_history[-16:]
-                
+
                 self.state.ai.last_prediction_metadata = {
-                    "prev_price": price or prev_meta.get("prev_price"),
+                    "prev_price": implied_price or prev_meta.get("prev_price"),
                     "current_probs": synthesis.get("current_probs")
                 }
                 self.state.ai.confidence_score = synthesis.get("confidence_score", 1.0)
-                
-                if price: self.state.update_ai_history(price)
+
+                if implied_price:
+                    self.state.update_ai_history(float(implied_price))
+
+            # Log prediction to Performance Ledger
+            if implied_price:
+                EvaluationService.log_prediction(float(implied_price))
         except Exception as e:
             logging.error(f"AIWorker Error: {e}")
         finally:
@@ -169,8 +190,23 @@ class ThreadOrchestrator:
                     self.state.btc.price = price
                     self.state.btc.last_update = time.time()
                 self.state.update_btc_history(price)
+                # Record actual price for performance ledger comparison
+                EvaluationService.log_actual_price(price)
         except Exception as e:
             logging.error(f"BTCWorker Error: {e}")
         finally:
             with self.state.btc.lock:
                 self.state.btc.updating = False
+
+    def _news_worker(self):
+        try:
+            headlines = NewsRepository.fetch_btc_headlines()
+            with self.state.news.lock:
+                self.state.news.headlines = headlines
+                self.state.news.last_update = time.time()
+            logging.info(f"NewsWorker: fetched {len(headlines)} headlines.")
+        except Exception as e:
+            logging.error(f"NewsWorker Error: {e}")
+        finally:
+            with self.state.news.lock:
+                self.state.news.updating = False

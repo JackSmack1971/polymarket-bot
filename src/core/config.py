@@ -29,3 +29,9 @@ OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
 # Model Selection
 DEFAULT_OPENAI_MODEL = "o3-mini"
 DEFAULT_OPENROUTER_MODEL = "moonshotai/kimi-k2"
+
+# Multi-Model Consensus Configuration
+# Set to True to enable querying both OpenAI and OpenRouter and resolving discrepancies.
+CONSENSUS_MODE = False  # Toggle per deployment
+CONSENSUS_DIVERGENCE_THRESHOLD = 2000  # $ spread triggering judge arbitration
+CONSENSUS_JUDGE_MODEL = "gpt-4o-mini"  # Cheap, fast judge for resolving discrepancies

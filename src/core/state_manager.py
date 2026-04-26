@@ -22,6 +22,7 @@ class AIState:
     updating: bool = False
     model: str = "AI"
     effort: str = ""
+    internal_audit: str = ""
     conversation_history: List[Dict[str, str]] = field(default_factory=list)
     last_prediction_metadata: Dict[str, Any] = field(default_factory=dict)
     confidence_score: float = 1.0
@@ -34,11 +35,19 @@ class BTCState:
     updating: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
 
+@dataclass
+class NewsState:
+    headlines: List[str] = field(default_factory=list)
+    last_update: float = 0.0
+    updating: bool = False
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
 class StateManager:
     def __init__(self):
         self.market = MarketState()
         self.ai = AIState()
         self.btc = BTCState()
+        self.news = NewsState()
         self.ai_price_history: List[float] = []
         self.btc_price_history: List[float] = []
         self.history_lock = threading.Lock()

@@ -5,7 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] - 2026-04-26
+
+### Added
+- **Structured Outputs (Hidden Chain-of-Thought)**: Replaced regex parsing with `pydantic`-backed structured outputs (`AIAnalysisResponse`). The AI now returns type-safe `implied_price` (int), `insight` (str ≤100 chars), and `internal_audit` (hidden CoT reasoning) fields — eliminating all parsing failures.
+- **Internal Audit Protocol**: System prompt now mandates a hidden reasoning pass before the final price is emitted. The `internal_audit` field contains probability-sum checks, fine-vs-broad EV comparisons, and tail-risk skew analysis — stored in `AIState` and logged to `bot.log`.
+- **Market Sentiment RAG Layer**: New `NewsRepository` (`src/repositories/news.py`) fetches the latest Bitcoin headlines from 3 public RSS feeds (Yahoo Finance, CoinTelegraph, CoinDesk) with exponential backoff. A `NewsWorker` daemon thread refreshes headlines every 5 minutes and injects them into the AI prompt under `### LIVE NEWS CONTEXT`, enabling insight lines like "Uptrend driven by ETF inflow news."
+- **NewsState**: New thread-safe `NewsState` dataclass added to `StateManager` with its own `threading.Lock`.
+- **Performance Ledger** (`src/services/evaluation_service.py`): Append-only `performance_ledger.jsonl` records every AI implied price prediction and every live CoinGecko BTC price. On each BTC refresh, prediction error (`implied - actual`) and percentage accuracy are calculated and logged to `bot.log`.
+- **Multi-Model Consensus** (`src/services/consensus_service.py`): Ensemble intelligence layer that queries both OpenAI and OpenRouter independently. When model divergence is within `$2,000`, results are averaged. When divergence exceeds the threshold, a lightweight `gpt-4o-mini` Judge Model arbitrates and selects the correct price.
+- **Consensus Configuration**: `CONSENSUS_MODE`, `CONSENSUS_DIVERGENCE_THRESHOLD`, and `CONSENSUS_JUDGE_MODEL` added to `src/core/config.py`. Disabled by default; toggle `CONSENSUS_MODE = True` to activate.
+- **New Dependencies**: `pydantic>=2.0.0`, `requests>=2.31.0`, `feedparser>=6.0.10` added to `requirements.txt`.
+
+### Changed
+- **Orchestrator News Integration**: `ThreadOrchestrator` now imports and manages `NewsRepository` and `EvaluationService`. News context is injected into market data before each AI call.
+- **AIWorker Structured Response Handling**: `_ai_worker` now reads `implied_price` directly from the structured result dict (with regex fallback) instead of re-parsing the content string.
+- **BTC Worker Ledger Hook**: `_btc_worker` now calls `EvaluationService.log_actual_price()` on every successful CoinGecko fetch.
+- **`AIState` Expansion**: Added `internal_audit: str` field to store the hidden CoT reasoning from each AI call.
+
+### Fixed
+- **Regex Fragility**: Eliminated sole reliance on `r'\$([0-9,]+)'` for price extraction; structured outputs are now the primary path with regex as emergency fallback only.
+- **Single-Provider Risk**: Multi-model consensus ensures continued operation when one provider fails or produces an outlier prediction.
+
 ## [3.1.0] - 2026-04-26
+
 
 ### Added
 - **Resilient Initial Loader**: Implemented an automatic retry loop for the initial market data fetch, ensuring the bot starts reliably even during transient network failures.
