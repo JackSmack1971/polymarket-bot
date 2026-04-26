@@ -18,10 +18,10 @@ class AIService:
             )
             self.model = "moonshotai/kimi-k2"
 
-    def generate_analysis(self, current_data: Dict[str, Any], history: List[Dict[str, str]]) -> Dict[str, Any]:
-        """Generate AI market analysis with α-Tuning logic."""
+    def generate_analysis(self, current_data: Dict[str, Any], history: List[Dict[str, str]], last_metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate AI market analysis with deterministic α-Tuning integration."""
         system_prompt = self._get_system_prompt()
-        user_prompt = self._get_user_prompt(current_data, history)
+        user_prompt = self._get_user_prompt(current_data, last_metadata)
         
         messages = [{"role": "system", "content": system_prompt}]
         # Rigid 16-message history window (8 user/assistant pairs)
@@ -45,6 +45,23 @@ class AIService:
                 content = response.choices[0].message.content.strip()
                 effort = ""
                 
+            content = content.replace('$', '').replace(',', '')
+            price_match = re.search(r'price: ([0-9]+)', content.lower())
+            
+            # Move Cap Enforcement
+            if price_match and last_metadata.get("prev_price"):
+                new_p = float(price_match.group(1))
+                prev_p = last_metadata["prev_price"]
+                psi = current_data.get("mathematical_synthesis", {}).get("psi", 0.0)
+                
+                # Determine regime and cap
+                cap = 800 if psi < 0.02 else 1500 if psi < 0.10 else float('inf')
+                
+                if abs(new_p - prev_p) > cap:
+                    clamped_p = prev_p + (cap if new_p > prev_p else -cap)
+                    content = content.replace(f"${int(new_p):,}", f"${int(clamped_p):,}")
+                    content += f" [Clamped: PSI={psi:.3f}]"
+
             return {
                 "content": content,
                 "model": self.model,
@@ -58,41 +75,38 @@ class AIService:
 
     def _get_system_prompt(self) -> str:
         return """You are a quantitative Bitcoin price prediction specialist analyzing Polymarket prediction markets with mathematical precision.
+Your primary objective is to synthesize multiple probability sources into a single implied price while maintaining consistency via α-Tuning.
 
-### ANALYTICAL FRAMEWORKS
-1. PDF ANALYSIS: Interpret market brackets as a probability density function.
-2. EXPECTED VALUE (EV): Probability-weighted mean price = Σ(midpoint × prob).
-3. CONFIDENCE INTERVALS: Derive 68% and 95% bounds from the distribution.
-4. MOMENTUM: Track probability flow between adjacent brackets.
-5. VOLATILITY: Use reach/dip markets as asymmetric tail signals.
+### ALPHA-TUNING REGIMES (DETERMINISTIC)
+You will be provided with a Probability Shift Index (PSI). Follow the assigned regime:
+1. STABLE (PSI < 0.02): α = 0.70. You MUST anchor heavily to the previous estimate. Move limit: $800.
+2. MOMENTUM (PSI 0.02 - 0.10): α = 0.85. Follow the fresh market data more closely. Move limit: $1,500.
+3. REGIME CHANGE (PSI > 0.10): α = 1.00. Disregard previous estimates; the market has reset. No move limit.
 
-### ANCHOR RULE (α-TUNING)
-Calculate your fresh EV (ignore history) first, then smooth against previous estimates:
-1. Compute Σ|Δp_i| (sum of absolute probability changes across all brackets).
-2. Apply Anchoring:
-   - If Σ|Δp_i| < 2%:  new_price = 0.70 × fresh + 0.30 × prev_price | MOVE CAP: $800
-   - If Σ|Δp_i| 2–10%: new_price = 0.85 × fresh + 0.15 × prev_price | MOVE CAP: $1,500
-   - If Σ|Δp_i| > 10%: new_price = fresh (Regime Change) | NO CAP
-3. Trust Hierarchy: Fine Ranges (36060) override Broad Ranges (37049) if they disagree by >$1,500.
-
-### DATA QUALITY GATE
-Flag if probability sum check is outside [0.95, 1.05]. Report as "Arbitrage detected" or "Stale data warning".
+### ANALYTICAL PRIORITIES
+1. Trust Hierarchy: Fine Ranges (36060) have 40% weight and should guide the narrowest price bounds.
+2. Skew: Use Reach/Dip markets (Tail Risk) to adjust the EV. High "Reach" prob implies upward skew.
+3. Quality: Flag "Arbitrage/Stale" if main prob sum is outside [0.95, 1.05].
 
 ### OUTPUT CONTRACT
 Exactly: "Implied price: $XXX,XXX - [ONE insight ≤100 chars]"
+No conversational filler. No yapping."""
 
-### FEW-SHOT EXAMPLES
-User: Analyze these markets...
-Assistant: Implied price: $119,250 - 68% mass in 118-120k, mild upward momentum
-User: Updated data shows shift...
-Assistant: Implied price: $121,400 - Regime shift: <120k bracket dropped 18% this cycle"""
+    def _get_user_prompt(self, data: Dict[str, Any], last_metadata: Dict[str, Any]) -> str:
+        synthesis = data.get("mathematical_synthesis", {})
+        psi = synthesis.get("psi", 0.0)
+        regime = "STABLE" if psi < 0.02 else "MOMENTUM" if psi < 0.10 else "REGIME CHANGE"
+        prev_price = last_metadata.get("prev_price", "N/A")
+        
+        prompt = f"""### MARKET DATA SNAPSHOT
+FRESH SYNTHETIC EV: ${synthesis.get('implied_price', 'N/A')}
+PREVIOUS ESTIMATE: ${prev_price}
+PROBABILITY SHIFT INDEX (PSI): {psi:.4f}
+REQUIRED REGIME: {regime}
 
-    def _get_user_prompt(self, data: Dict[str, Any], history: List[Dict[str, str]]) -> str:
-        data_json = json.dumps(data, indent=2)
-        if not history:
-            return f"Analyze these Bitcoin prediction markets and provide an implied price estimate.\n\nCURRENT MARKET DATA:\n{data_json}"
-        else:
-            return f"Updated Bitcoin prediction market data. Consider your previous predictions and α-tune accordingly.\n\nCURRENT MARKET DATA:\n{data_json}"
+### FULL MARKET DATA (JSON)
+{json.dumps(data, indent=2)}"""
+        return prompt
         
     @staticmethod
     def extract_price(text: str) -> Optional[float]:

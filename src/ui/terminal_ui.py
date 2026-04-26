@@ -117,14 +117,22 @@ class TerminalUI:
                 main = copy.deepcopy(self.state.market.main_brackets)
                 fine = copy.deepcopy(self.state.market.fine_brackets)
                 tail = copy.deepcopy(self.state.market.tail_brackets)
+            
+            with self.state.ai.lock:
+                prev_meta = copy.deepcopy(self.state.ai.last_prediction_metadata)
+                prev_probs = prev_meta.get("current_probs")
 
-            synthesis = PredictionService.calculate_implied_price(main, fine, tail)
+            synthesis = PredictionService.calculate_implied_price(main, fine, tail, previous_probs=prev_probs)
+            if not synthesis: return
+
             market_data = {
                 "main_event": main,
                 "mathematical_synthesis": synthesis,
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
             }
-            result = self.ai_service.generate_analysis(market_data, self.state.ai.conversation_history)
+            result = self.ai_service.generate_analysis(market_data, self.state.ai.conversation_history, prev_meta)
+            
+            price = AIService.extract_price(result["content"])
             
             with self.state.ai.lock:
                 self.state.ai.analysis = result["content"]
@@ -135,7 +143,13 @@ class TerminalUI:
                 self.state.ai.conversation_history.append({"role": "assistant", "content": result["content"]})
                 if len(self.state.ai.conversation_history) > 16:
                     self.state.ai.conversation_history = self.state.ai.conversation_history[-16:]
-                price = AIService.extract_price(result["content"])
+                
+                # Update metadata for next turn
+                self.state.ai.last_prediction_metadata = {
+                    "prev_price": price or prev_meta.get("prev_price"),
+                    "current_probs": synthesis.get("current_probs")
+                }
+                
                 if price: self.state.update_ai_history(price)
         finally:
             with self.state.ai.lock:

@@ -23,6 +23,7 @@ class AIState:
     model: str = "AI"
     effort: str = ""
     conversation_history: List[Dict[str, str]] = field(default_factory=list)
+    last_prediction_metadata: Dict[str, Any] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 @dataclass

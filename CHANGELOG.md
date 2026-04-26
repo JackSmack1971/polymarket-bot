@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-04-26
+
+### Added
+- **Deterministic α-Tuning**: Transitioned from heuristic prompt-based smoothing to code-enforced regimes based on the new Probability Shift Index (PSI).
+- **Source-Weighted EV Synthesis**: Implemented a normalized weighted ensemble (Main: 35%, Fine: 40%, Tail: 25%) in `PredictionService`.
+- **Hard Move Caps**: Implemented code-level clamping ($800 for Stable, $1500 for Momentum) to prevent AI hallucinatory volatility.
+- **Regime Detection**: Automated detection of market regimes (STABLE, MOMENTUM, REGIME CHANGE) passed explicitly to the AI model.
+
+### Changed
+- **Stateless Mathematical Logic**: Further refined `PredictionService` to handle multi-source EV calculations with normalized probability mass.
+- **Enhanced AI Prompting**: Refined the user prompt to include explicit `PREVIOUS_ESTIMATE` and `PSI` metrics, reducing model reliance on conversational history.
+- **State Management**: Expanded `AIState` to track prediction metadata across turns.
+
+### Fixed
+- **Weighting Imbalance**: Fixed issue where the source with the most brackets would disproportionately skew the implied price.
+- **Hallucination Risk**: Reduced risk of AI ignoring move limits by enforcing them in the Python service layer.
+
 ## [2.1.0] - 2026-04-26
 
 ### Added

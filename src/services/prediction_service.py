@@ -7,106 +7,111 @@ class PredictionService:
     def calculate_implied_price(
         main_brackets: List[Dict[str, Any]], 
         fine_ranges: List[Dict[str, Any]], 
-        reach_dip_data: List[Dict[str, Any]]
+        reach_dip_data: List[Dict[str, Any]],
+        previous_probs: Optional[Dict[str, float]] = None
     ) -> Optional[Dict[str, Any]]:
-        """Calculate implied Bitcoin price from market probabilities."""
+        """Calculate implied Bitcoin price from market probabilities with source weighting."""
         try:
-            ranges = []
-            prob_sum_check = 0.0
+            sources = {
+                "main": {"data": main_brackets, "weight": 0.35, "ev": 0.0, "total_prob": 0.0},
+                "fine": {"data": fine_ranges, "weight": 0.40, "ev": 0.0, "total_prob": 0.0},
+                "tail": {"data": reach_dip_data, "weight": 0.25, "ev": 0.0, "total_prob": 0.0}
+            }
             
-            # 1. Main Event (Broad Ranges - 35% Trust)
+            all_ranges = []
+            current_probs = {}
+
+            # 1. Process Main Event
             for b in main_brackets:
-                if b.get("last_yes") is None: continue
+                prob = b.get("last_yes", 0.0) or 0.0
                 bracket = b["bracket"].lower()
-                prob = b["last_yes"]
+                current_probs[b["bracket"]] = prob
                 
-                # Full mapping for 37049
-                if "less than" in bracket and "120" in bracket:
-                    ranges.append({"mid": 115000, "prob": prob, "source": "main", "weight": 0.35})
-                elif "120" in bracket and "121" in bracket:
-                    ranges.append({"mid": 120500, "prob": prob, "source": "main", "weight": 0.35})
-                elif "121" in bracket and "122" in bracket:
-                    ranges.append({"mid": 121500, "prob": prob, "source": "main", "weight": 0.35})
-                elif "122" in bracket and "123" in bracket:
-                    ranges.append({"mid": 122500, "prob": prob, "source": "main", "weight": 0.35})
-                elif "greater than" in bracket and "123" in bracket:
-                    ranges.append({"mid": 125000, "prob": prob, "source": "main", "weight": 0.35})
+                mid = None
+                if "less than" in bracket and "120" in bracket: mid = 115000
+                elif "120" in bracket and "121" in bracket: mid = 120500
+                elif "121" in bracket and "122" in bracket: mid = 121500
+                elif "122" in bracket and "123" in bracket: mid = 122500
+                elif "greater than" in bracket and "123" in bracket: mid = 125000
                 
-                if any(x in bracket for x in ["less than", "between", "greater than"]):
-                    prob_sum_check += prob
+                if mid:
+                    sources["main"]["ev"] += prob * mid
+                    sources["main"]["total_prob"] += prob
+                    all_ranges.append({"mid": mid, "prob": prob, "source": "main"})
 
-            # 2. Fine Ranges (36060 - 40% Trust)
+            # 2. Process Fine Ranges
             for f in fine_ranges:
+                prob = f.get("last_yes", 0.0) or f.get("yes_price", 0.0) or 0.0
                 bracket = f["bracket"].lower()
-                prob = f["yes_price"]
-                if prob is None: continue
+                current_probs[f["bracket"]] = prob
                 
-                # Exhaustive mapping for 36060
-                if "less than" in bracket and "110" in bracket:
-                    ranges.append({"mid": 105000, "prob": prob, "source": "fine", "weight": 0.40})
-                elif "110" in bracket and "112" in bracket:
-                    ranges.append({"mid": 111000, "prob": prob, "source": "fine", "weight": 0.40})
-                elif "112" in bracket and "114" in bracket:
-                    ranges.append({"mid": 113000, "prob": prob, "source": "fine", "weight": 0.40})
-                elif "114" in bracket and "116" in bracket:
-                    ranges.append({"mid": 115000, "prob": prob, "source": "fine", "weight": 0.40})
-                elif "116" in bracket and "118" in bracket:
-                    ranges.append({"mid": 117000, "prob": prob, "source": "fine", "weight": 0.40})
-                elif "greater than" in bracket and "118" in bracket:
-                    ranges.append({"mid": 120000, "prob": prob, "source": "fine", "weight": 0.40})
+                mid = None
+                if "less than" in bracket and "110" in bracket: mid = 105000
+                elif "110" in bracket and "112" in bracket: mid = 111000
+                elif "112" in bracket and "114" in bracket: mid = 113000
+                elif "114" in bracket and "116" in bracket: mid = 115000
+                elif "116" in bracket and "118" in bracket: mid = 117000
+                elif "greater than" in bracket and "118" in bracket: mid = 120000
+                
+                if mid:
+                    sources["fine"]["ev"] += prob * mid
+                    sources["fine"]["total_prob"] += prob
+                    all_ranges.append({"mid": mid, "prob": prob, "source": "fine"})
 
-            # 3. Reach/Dip (37057 - 25% Trust)
+            # 3. Process Reach/Dip
             for r in reach_dip_data:
+                prob = r.get("last_yes", 0.0) or r.get("yes_price", 0.0) or 0.0
                 bracket = r["bracket"].lower()
-                prob = r["yes_price"]
-                if prob is None: continue
-                if "dip to $120k" in bracket: continue # Resolved
+                current_probs[r["bracket"]] = prob
                 
-                # Exhaustive mapping for 37057
-                if "reach" in bracket and "$127k" in bracket:
-                    ranges.append({"mid": 127000, "prob": prob, "source": "tail", "weight": 0.25})
-                elif "reach" in bracket and "$125k" in bracket:
-                    ranges.append({"mid": 125000, "prob": prob, "source": "tail", "weight": 0.25})
-                elif "reach" in bracket and "$123k" in bracket:
-                    ranges.append({"mid": 123000, "prob": prob, "source": "tail", "weight": 0.25})
-                elif "dip to" in bracket and "$118k" in bracket:
-                    ranges.append({"mid": 118000, "prob": prob, "source": "tail", "weight": 0.25})
-                elif "dip to" in bracket and "$116k" in bracket:
-                    ranges.append({"mid": 116000, "prob": prob, "source": "tail", "weight": 0.25})
+                mid = None
+                if "reach" in bracket and "$127k" in bracket: mid = 127000
+                elif "reach" in bracket and "$125k" in bracket: mid = 125000
+                elif "reach" in bracket and "$123k" in bracket: mid = 123000
+                elif "dip to" in bracket and "$118k" in bracket: mid = 118000
+                elif "dip to" in bracket and "$116k" in bracket: mid = 116000
+                
+                if mid:
+                    sources["tail"]["ev"] += prob * mid
+                    sources["tail"]["total_prob"] += prob
+                    all_ranges.append({"mid": mid, "prob": prob, "source": "tail"})
 
-            if not ranges:
-                return None
-                
-            # Calculate EVs per source for discrepancy detection
-            fine_ranges_list = [r for r in ranges if r["source"] == "fine"]
-            main_ranges_list = [r for r in ranges if r["source"] == "main"]
+            # Calculate Normalized EVs and Combined EV
+            weighted_ev_sum = 0.0
+            total_weight = 0.0
             
-            fine_ev = sum(r["prob"] * r["mid"] for r in fine_ranges_list) / sum(r["prob"] for r in fine_ranges_list) if fine_ranges_list else None
-            main_ev = sum(r["prob"] * r["mid"] for r in main_ranges_list) / sum(r["prob"] for r in main_ranges_list) if main_ranges_list else None
+            source_evs = {}
+            for name, s in sources.items():
+                if s["total_prob"] > 0:
+                    normalized_ev = s["ev"] / s["total_prob"]
+                    source_evs[name] = normalized_ev
+                    weighted_ev_sum += normalized_ev * s["weight"]
+                    total_weight += s["weight"]
             
-            discrepancy = abs(fine_ev - main_ev) if fine_ev and main_ev else 0
+            implied_price = weighted_ev_sum / total_weight if total_weight > 0 else None
             
-            # Calculate standard combined EV
-            total_weighted = sum(r["prob"] * r["mid"] for r in ranges)
-            total_prob = sum(r["prob"] for r in ranges)
-            implied_price = total_weighted / total_prob if total_prob > 0 else None
+            # Calculate PSI (Probability Shift Index)
+            psi = 0.0
+            if previous_probs:
+                for b, p in current_probs.items():
+                    if b in previous_probs:
+                        psi += abs(p - previous_probs[b])
             
             # Identify most likely range
-            max_prob_range = max(ranges, key=lambda x: x["prob"]) if ranges else None
+            max_prob_range = max(all_ranges, key=lambda x: x["prob"]) if all_ranges else None
             
             return {
                 "implied_price": round(implied_price) if implied_price else None,
                 "max_prob": round(max_prob_range["prob"], 3) if max_prob_range else 0.0,
                 "max_prob_source": max_prob_range["source"] if max_prob_range else "unknown",
-                "prob_sum_check": round(prob_sum_check, 4),
-                "is_stable": 0.95 <= prob_sum_check <= 1.05,
-                "discrepancy": round(discrepancy),
-                "trust_distribution": {
-                    "fine": len(fine_ranges_list),
-                    "main": len(main_ranges_list),
-                    "tail": len([r for r in ranges if r["source"] == "tail"])
-                }
+                "prob_sum_check": round(sources["main"]["total_prob"], 4),
+                "is_stable": 0.95 <= sources["main"]["total_prob"] <= 1.05,
+                "psi": round(psi, 4),
+                "discrepancy": round(abs(source_evs.get("fine", 0) - source_evs.get("main", 0))) if "fine" in source_evs and "main" in source_evs else 0,
+                "source_evs": {k: round(v) for k, v in source_evs.items()},
+                "current_probs": current_probs
             }
         except Exception:
-            pass
+            import traceback
+            traceback.print_exc()
         return None
