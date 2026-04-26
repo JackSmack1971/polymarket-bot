@@ -22,8 +22,8 @@ A hacker-style terminal application that analyzes Bitcoin prediction markets on 
 
 1. **Clone the repository:**
 ```bash
-git clone https://github.com/All-About-AI-YouTube/polymarket_ai_bitcoin.git
-cd polymarket_ai_bitcoin
+git clone https://github.com/JackSmack1971/polymarket-bot.git
+cd polymarket-bot
 ```
 
 2. **Install dependencies:**
@@ -46,13 +46,21 @@ OPENROUTER_API_KEY=sk-or-v1-your-openrouter-key-here
 
 ## Usage
 
-### OpenAI Version (with Reasoning API)
+### Unified Terminal (Recommended)
 ```bash
-python poly_ui.py -e 37049
+# OpenAI Version
+python main.py -e 37049 -p openai
+
+# OpenRouter Version
+python main.py -e 37049 -p openrouter
 ```
 
-### OpenRouter Version (with Claude, Llama, etc.)
+### Original Shims
 ```bash
+# OpenAI shim
+python poly_ui.py -e 37049
+
+# OpenRouter shim
 python poly_or.py -e 37049
 ```
 
