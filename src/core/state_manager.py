@@ -55,6 +55,17 @@ class StateManager:
                 self.btc_price_history.append(price)
                 self.btc_price_history = self.btc_price_history[-100:]
 
+    def update_market_history(self, token_id: str, price: float):
+        """Update individual bracket history within market state."""
+        with self.market.lock:
+            for brackets in [self.market.main_brackets, self.market.fine_brackets, self.market.tail_brackets]:
+                for b in brackets:
+                    if b.get("yes_token") == token_id:
+                        if "yes_hist" not in b: b["yes_hist"] = []
+                        b["yes_hist"].append(price)
+                        b["yes_hist"] = b["yes_hist"][-30:]
+                        return
+
     def get_histories(self):
         with self.history_lock:
             return list(self.ai_price_history), list(self.btc_price_history)

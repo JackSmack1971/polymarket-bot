@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-04-26
+
+### Added
+- **Thread Orchestrator**: Implemented `ThreadOrchestrator` to decouple background data ingestion from the UI layer.
+- **Asynchronous Initialization**: Added a non-blocking initial load phase with a "LOADING DATA..." UI state.
+- **Windows Compatibility**: Added `windows-curses` support and updated `requirements.txt` for cross-platform stability.
+
+### Changed
+- **Modular R-C-S-R Evolution**: Successfully evolved the architecture to separate Orchestration (Controller) from Rendering (UI).
+- **State Encapsulation**: Moved market history logic into `StateManager` for better thread safety and data integrity.
+- **UI Render Discipline**: Refactored `TerminalUI` into a pure view component that operates on state snapshots.
+
+### Fixed
+- **UI Startup Freeze**: Resolved synchronous API calls during initialization that caused the terminal to hang.
+- **Rendering Artifacts**: Fixed broken rendering blocks in the AI analysis panel.
+- **Thread Leakage Risk**: Improved worker management through centralized orchestration.
+
 ## [2.4.0] - 2026-04-26
 
 ### Added
