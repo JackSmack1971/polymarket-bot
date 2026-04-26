@@ -97,9 +97,13 @@ class PredictionService:
                     if b in previous_probs:
                         psi += abs(p - previous_probs[b])
             
-            # Identify most likely range
-            max_prob_range = max(all_ranges, key=lambda x: x["prob"]) if all_ranges else None
-            
+            # Calculate confidence score (0.0 to 1.0)
+            conf = 1.0
+            if psi > 0.10: conf -= 0.3 # Regime change lowers confidence
+            if discrepancy > 1500: conf -= 0.2 # Source disagreement
+            if not (0.98 <= sources["main"]["total_prob"] <= 1.02): conf -= 0.1 # Prob sum drift
+            conf = max(0.1, conf)
+
             return {
                 "implied_price": round(implied_price) if implied_price else None,
                 "max_prob": round(max_prob_range["prob"], 3) if max_prob_range else 0.0,
@@ -107,7 +111,8 @@ class PredictionService:
                 "prob_sum_check": round(sources["main"]["total_prob"], 4),
                 "is_stable": 0.95 <= sources["main"]["total_prob"] <= 1.05,
                 "psi": round(psi, 4),
-                "discrepancy": round(abs(source_evs.get("fine", 0) - source_evs.get("main", 0))) if "fine" in source_evs and "main" in source_evs else 0,
+                "confidence_score": round(conf, 2),
+                "discrepancy": discrepancy,
                 "source_evs": {k: round(v) for k, v in source_evs.items()},
                 "current_probs": current_probs
             }

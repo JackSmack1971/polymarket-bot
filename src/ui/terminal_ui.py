@@ -10,6 +10,7 @@ from src.services.prediction_service import PredictionService
 from src.services.ai_service import AIService
 from src.ui.charts import ChartRenderer
 from src.ui.sparklines import SparklineGenerator
+from src.ui.histogram import HistogramRenderer
 from src.core.config import EVENT_ID_FINE_RANGES, EVENT_ID_REACH_DIP
 
 class TerminalUI:
@@ -149,6 +150,7 @@ class TerminalUI:
                     "prev_price": price or prev_meta.get("prev_price"),
                     "current_probs": synthesis.get("current_probs")
                 }
+                self.state.ai.confidence_score = synthesis.get("confidence_score", 1.0)
                 
                 if price: self.state.update_ai_history(price)
         finally:
@@ -191,24 +193,18 @@ class TerminalUI:
             model_info = self.state.ai.model
             effort = self.state.ai.effort
 
-        ai_lines = self._wrap_text(analysis_text, ai_w, model_info, effort)
-        for i, line in enumerate(ai_lines):
-            if 1 + i < h - 2:
-                try:
-                    # Color the model prefix
-                    prefix_end = line.find(']> ') + 3 if ']> ' in line else 0
-                    if prefix_end > 0:
-                        stdscr.addstr(1+i, 0, line[:prefix_end], curses.color_pair(1) | curses.A_BOLD)
-                        stdscr.addstr(1+i, prefix_end, line[prefix_end:], curses.color_pair(3) | curses.A_ITALIC)
-                    else:
-                        stdscr.addstr(1+i, 0, line, curses.color_pair(3) | curses.A_ITALIC)
                 except curses.error: pass
 
+        # 2.5 Probability Distribution (New)
+        hist_h = 4
+        hist_y = 1 + len(ai_lines) + 1
+        HistogramRenderer.draw_probability_dist(stdscr, hist_y, 0, ai_w, hist_h, brackets)
+
         # 3. Market Data Panel (Bottom Left)
-        table_start_row = 1 + len(ai_lines) + 1
+        table_start_row = hist_y + hist_h + 1
         if table_start_row < h - 5:
             try:
-                stdscr.addstr(table_start_row, 0, "BRACKET".ljust(25) + "YES".ljust(10) + "DIR".ljust(5) + "TREND", curses.color_pair(4))
+                stdscr.addstr(table_start_row, 0, "BRACKET".ljust(25) + "YES".ljust(10) + "DIR".ljust(5) + "TREND", curses.color_pair(4) | curses.A_UNDERLINE)
                 stdscr.hline(table_start_row + 1, 0, ord('─'), sep_col - 1)
             except curses.error: pass
 
@@ -271,9 +267,23 @@ class TerminalUI:
         mkt_status = get_status(self.state.market.last_update, 15, "MKT")
         btc_status = get_status(self.state.btc.last_update, 60, "CG")
         
-        full_footer = f"{status_line} │ {ai_status} │ {mkt_status} │ {btc_status}"
+        # Confidence Indicator
+        with self.state.ai.lock:
+            conf = self.state.ai.confidence_score
+        
+        if conf > 0.8:
+            conf_str = f"CONF: {int(conf*100)}% [HIGH]"
+            color = curses.color_pair(1) # Green
+        elif conf > 0.5:
+            conf_str = f"CONF: {int(conf*100)}% [MED]"
+            color = curses.color_pair(3) # Yellow
+        else:
+            conf_str = f"CONF: {int(conf*100)}% [LOW]"
+            color = curses.color_pair(2) # Red
+        
+        full_footer = f"{status_line} │ {ai_status} │ {mkt_status} │ {btc_status} │ {conf_str}"
         try: 
-            stdscr.addstr(h-1, 0, full_footer[:w-1], curses.color_pair(1) | curses.A_BOLD)
+            stdscr.addstr(h-1, 0, full_footer[:w-1], color | curses.A_BOLD)
         except curses.error: pass
 
         stdscr.refresh()
